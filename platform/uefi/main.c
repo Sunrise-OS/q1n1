@@ -21,6 +21,7 @@
 #include "boot-window.h"
 #include "q1n1-proxy.h"
 #include "preload.h"
+#include "xnu-boot.h"
 
 static struct {
     volatile uint32_t *pixels;
@@ -39,9 +40,14 @@ static int fault_test;
 extern const uint8_t q1n1_logo[];
 extern void q1n1_enter(void) __attribute__((noreturn));
 
+extern void q1n1_xnu_enter(uint64_t args, uint64_t entry, uint64_t clean_base,
+                           uint64_t clean_size, uint64_t extra_base, uint64_t extra_size)
+    __attribute__((noreturn));
+static struct q1n1_xnu_launch xnu_launch;
 #define MODE_FOOTHOLD 0
 #define MODE_USB_PROXY 1
 #define MODE_UART_PROXY 2
+#define MODE_XNU_BOOT 3
 #define HEAP_BYTES (64u << 20)
 #define MAP_BYTES (256u * 1024)
 #define STAGE_BYTES (16u << 20)
@@ -747,6 +753,11 @@ static void proxy_main(void)
 void q1n1_main(void) __attribute__((noreturn));
 void q1n1_main(void)
 {
+    if (mode == MODE_XNU_BOOT) {
+        q1n1_xnu_enter((uint64_t)(uintptr_t)xnu_launch.args, xnu_launch.entry,
+                       xnu_launch.allocation_base, xnu_launch.allocation_pages * 4096,
+                       xnu_launch.ramdisk_base, 4096);
+    }
     if (mode != MODE_FOOTHOLD) proxy_main();
     uint64_t el = current_el(), midr;
     __asm__ volatile("mrs %0, midr_el1" : "=r"(midr));
@@ -919,6 +930,29 @@ efi_status efi_main(efi_handle handle, struct efi_system_table *st)
     firmware_out(st,fb.pixels ? "GOP framebuffer captured.\n" : "No usable GOP framebuffer.\n");
     firmware_out(st,uart.base ? "ACPI SPCR UART found.\n" : "No usable ACPI SPCR UART.\n");
     if (option(image,"--boot") || option(image,"--uart-proxy")) return proxy_efi_main(handle, st, image);
+    if (option(image, "--xnu")) {
+        if (!fb.pixels || before_el != 1) {
+            firmware_out(st, "XNU boot currently requires EL1 entry and a GOP framebuffer.\n");
+            return EFI_UNSUPPORTED;
+        }
+        struct q1n1_xnu_video video = {
+            .base_addr = (uint64_t)(uintptr_t)fb.pixels,
+            .display = 1,
+            .bytes_per_row = (uint64_t)fb.stride * 4,
+            .width = fb.width,
+            .height = fb.height,
+            .depth = 32,
+        };
+        efi_status status = q1n1_xnu_prepare(st->boot, image, &video, &xnu_launch);
+        if (status) {
+            firmware_out(st, "XNU kernel/AFDT load or boot-argument preparation failed.\n");
+            return status;
+        }
+        mode = MODE_XNU_BOOT;
+        uart.enabled = 0;
+        firmware_out(st, "XNU image and boot arguments prepared; leaving boot services.\n");
+        return leave_firmware(handle, st, "Leaving firmware for XNU.\n");
+    }
     if (!option(image,"--el2")) {
         firmware_out(st,"Preflight only. No ExitBootServices or UART MMIO.\n");
         if (before_el == 2)

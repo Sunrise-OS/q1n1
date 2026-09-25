@@ -275,10 +275,20 @@ $(OUT)/sha256.obj: platform/uefi/sha256.c platform/uefi/sha256.h
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(OUT)/xnu-boot.obj: platform/uefi/xnu-boot.c platform/uefi/xnu-boot.h
+	@mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OUT)/xnu-boot-efi.obj: platform/uefi/xnu-boot-efi.c platform/uefi/xnu-boot.h platform/uefi/efi.h
+	@mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+
+
 $(OUT)/q1n1.efi: $(OUT)/main.obj $(OUT)/entry-frame.obj $(OUT)/boot-window.obj $(OUT)/ucsi-console.obj \
     $(OUT)/q1n1-proxy.obj $(OUT)/proxy-asm.obj $(OUT)/qcom-dwc3.obj $(OUT)/usb-ports.obj $(OUT)/gicv3.obj \
     $(OUT)/console.obj $(OUT)/sysinfo.obj $(OUT)/fbcon.obj $(OUT)/xhci.obj $(OUT)/ncm.obj $(OUT)/ncm-proxy.obj \
-    $(OUT)/preload.obj $(OUT)/sha256.obj
+    $(OUT)/preload.obj $(OUT)/sha256.obj $(OUT)/xnu-boot.obj $(OUT)/xnu-boot-efi.obj
 	$(LD) /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:arm64 \
 	    /dynamicbase /out:$@ $^
 

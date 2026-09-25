@@ -64,6 +64,46 @@ q1n1_enter:
     bl q1n1_main
 3:  wfe
     b 3b
+.p2align 4
+.globl q1n1_xnu_enter
+q1n1_xnu_enter:
+    /* x0=args, x1=entry, x2/x3=kernel allocation, x4/x5=extra region. */
+    msr daifset, #15
+    mov x19, x0
+    mov x20, x1
+    mrs x9, ctr_el0
+    ubfx x9, x9, #16, #4
+    mov x10, #4
+    lsl x10, x10, x9              /* D-cache line bytes */
+    sub x9, x10, #1
+    bic x11, x2, x9
+    add x12, x2, x3
+1:  cmp x11, x12
+    b.hs 2f
+    dc cvac, x11
+    add x11, x11, x10
+    b 1b
+2:  bic x11, x4, x9
+    add x12, x4, x5
+3:  cmp x11, x12
+    b.hs 4f
+    dc cvac, x11
+    add x11, x11, x10
+    b 3b
+4:  dsb sy
+    ic iallu
+    dsb sy
+    tlbi vmalle1
+    dsb sy
+    isb
+    mrs x11, sctlr_el1
+    bic x11, x11, #1               /* disable EL1 stage-1 MMU */
+    bic x11, x11, #4               /* disable data cache */
+    bic x11, x11, #0x1000          /* disable instruction cache */
+    msr sctlr_el1, x11
+    isb
+    mov x0, x19
+    br x20
 
 #ifdef Q1N1_EXCEPTION_FRAME
 /* Recoverable vectors for q1n1.efi: save x0-x30 and the interrupted SP in a
