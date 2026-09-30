@@ -67,6 +67,62 @@ int q1n1_xnu_afdt_length(const void *tree, size_t available, size_t *length)
     return 0;
 }
 
+static int field_matches(const uint8_t *field, size_t size, const char *text)
+{
+    size_t i = 0;
+    while (i < size && text[i] && field[i] == (uint8_t)text[i])
+        ++i;
+    return i < size && !text[i] && !field[i];
+}
+
+/* Locate exactly one /chosen/random-seed without changing the tree layout.
+ * The whole encoding is validated before walking the root's direct children. */
+int q1n1_xnu_afdt_seed(void *tree, size_t available, uint8_t **seed)
+{
+    size_t length, offset = 8;
+    uint8_t *bytes = tree;
+    if (!seed)
+        return -1;
+    *seed = 0;
+    if (q1n1_xnu_afdt_length(tree, available, &length) || length != available)
+        return -1;
+    uint32_t properties = read_le32(bytes), children = read_le32(bytes + 4);
+    for (uint32_t i = 0; i < properties; ++i)
+        offset += 36 + (((size_t)read_le32(bytes + offset + 32) + 3) & ~(size_t)3);
+    unsigned chosen_count = 0;
+    for (uint32_t i = 0; i < children; ++i) {
+        uint8_t *node = bytes + offset;
+        size_t node_size, pos = 8;
+        uint8_t *candidate = 0;
+        unsigned names = 0, seeds = 0;
+        int chosen = 0;
+        if (afdt_node_size(node, available - offset, &node_size, 1))
+            return -1;
+        for (uint32_t j = 0; j < read_le32(node); ++j) {
+            uint32_t size = read_le32(node + pos + 32);
+            if (field_matches(node + pos, 32, "name")) {
+                ++names;
+                chosen = field_matches(node + pos + 36, size, "chosen");
+            }
+            if (field_matches(node + pos, 32, "random-seed")) {
+                ++seeds;
+                if (size == 256)
+                    candidate = node + pos + 36;
+            }
+            pos += 36 + (((size_t)size + 3) & ~(size_t)3);
+        }
+        if (names > 1)
+            return -1;
+        if (chosen) {
+            if (++chosen_count != 1 || seeds != 1 || !candidate)
+                return -1;
+            *seed = candidate;
+        }
+        offset += node_size;
+    }
+    return chosen_count == 1 ? 0 : -1;
+}
+
 /* Map an LC_MAIN file offset to its VM address through the non-empty
  * segment whose file range contains it. The commands were validated by the
  * caller's walk. */

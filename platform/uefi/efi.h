@@ -14,6 +14,7 @@ typedef struct { uint64_t signature; uint32_t revision, size, crc, reserved; } e
 #define EFI_INVALID_PARAMETER EFI_ERROR(2)
 #define EFI_UNSUPPORTED EFI_ERROR(3)
 #define EFI_NOT_FOUND EFI_ERROR(14)
+#define EFI_DEVICE_ERROR EFI_ERROR(7)
 #define EFI_LOADER_DATA 2
 #define EFI_BY_PROTOCOL 2
 
@@ -98,6 +99,11 @@ struct efi_file {
     void *write, *get_position, *set_position;
     efi_status (*get_info)(struct efi_file *, efi_guid *, uint64_t *, void *);
 };
+struct efi_rng {
+    efi_status (*get_info)(struct efi_rng *, uint64_t *, efi_guid *);
+    efi_status (*get_rng)(struct efi_rng *, efi_guid *, uint64_t, uint8_t *);
+};
+_Static_assert(offsetof(struct efi_rng, get_rng) == 8, "UEFI RNG.GetRNG ABI");
 struct efi_simple_fs {
     uint64_t revision;
     efi_status (*open_volume)(struct efi_simple_fs *, struct efi_file **);

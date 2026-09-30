@@ -24,6 +24,38 @@ static efi_guid file_info_guid = {
     0x09576e92, 0x6d3f, 0x11d2, {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}
 };
 
+static efi_guid rng_guid = {
+    0x3152bca5, 0xeade, 0x433d, {0x86, 0x2e, 0xc0, 0x1c, 0xdc, 0x29, 0x1f, 0x44}
+};
+
+efi_status q1n1_xnu_refresh_seed(struct efi_boot_services *boot, void *tree, size_t size)
+{
+    uint8_t *seed = 0;
+    struct efi_rng *rng = 0;
+    if (q1n1_xnu_afdt_seed(tree, size, &seed))
+        return EFI_INVALID_PARAMETER;
+    /* Discard the on-disk template even when protocol lookup fails. */
+    memset(seed, 0, 256);
+    if (!boot || !boot->locate_protocol)
+        return EFI_UNSUPPORTED;
+    efi_status status = boot->locate_protocol(&rng_guid, 0, (void **)&rng);
+    if (status)
+        return status;
+    if (!rng || !rng->get_rng)
+        return EFI_UNSUPPORTED;
+    status = rng->get_rng(rng, 0, 256, seed);
+    if (status) {
+        memset(seed, 0, 256);
+        return status;
+    }
+    /* Reject a broken source that claims success without supplying a seed.
+     * This is a sanity check, not an entropy quality test. */
+    uint8_t any = 0;
+    for (size_t i = 0; i < 256; ++i)
+        any |= seed[i];
+    return any ? 0 : EFI_DEVICE_ERROR;
+}
+
 static efi_status get_file_size(struct efi_file *file, uint64_t *size)
 {
     uint64_t info[128];
@@ -160,6 +192,9 @@ efi_status q1n1_xnu_prepare(struct efi_boot_services *boot,
         status = EFI_INVALID_PARAMETER;
         goto done;
     }
+    status = q1n1_xnu_refresh_seed(boot, (void *)(uintptr_t)afdt, (size_t)afdt_size);
+    if (status)
+        goto done;
     if (inspected.vm_end - inspected.vm_base > SIZE_MAX ||
         inspected.vm_end - inspected.vm_base > XNU_MAX_KERNEL_SIZE) {
         status = EFI_INVALID_PARAMETER;
@@ -237,8 +272,13 @@ failed_target:
 done:
     if (kernel)
         boot->free_pages(kernel, (kernel_size + PAGE_MASK) / PAGE_SIZE);
-    if (afdt)
+    if (afdt) {
+        /* Avoid leaving another copy of the boot seed in freed pages. */
+        volatile uint8_t *bytes = (void *)(uintptr_t)afdt;
+        for (uint64_t i = 0; i < afdt_size; ++i)
+            bytes[i] = 0;
         boot->free_pages(afdt, (afdt_size + PAGE_MASK) / PAGE_SIZE);
+    }
     if (root && root->close)
         root->close(root);
     return status;

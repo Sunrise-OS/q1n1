@@ -85,6 +85,10 @@ struct q1n1_xnu_launch {
 
 /* Validate the Apple flattened-device-tree encoding and return exact length. */
 int q1n1_xnu_afdt_length(const void *tree, size_t available, size_t *length);
+/* Require exactly one 256-byte /chosen/random-seed property. */
+int q1n1_xnu_afdt_seed(void *tree, size_t available, uint8_t **seed);
+/* Replace the template seed via EFI RNG; no fallback on missing/failed RNG. */
+efi_status q1n1_xnu_refresh_seed(struct efi_boot_services *boot, void *tree, size_t size);
 
 /* Load \\KERNEL and \\AFDT from the image's Simple File System volume and
  * prepare ABI-compatible boot arguments in the final physical allocation. */
